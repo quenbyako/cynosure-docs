@@ -1,0 +1,45 @@
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Usecase as Usecase (chat.Usecase)
+    participant AgentStore as AgentStorage (ports.AgentStorage)
+    participant ThreadStore as ThreadStorage (ports.ThreadStorage)
+    participant RetrieverRegistry as Retriever Registry / DI
+    participant Retriever as Retriever Adapter (toolretriever.Port)
+    participant ChatAgg as Chat Aggregate (chat.Chat)
+
+    Client->>Usecase: GenerateResponse(threadID, userMsg, agentID)
+    
+    rect rgb(220, 235, 255)
+        note right of Usecase: Step 1: Resolve Agent & Retrieve Strategy
+        alt Specific Agent requested
+            Usecase->>AgentStore: GetAgent(ctx, agentID)
+            AgentStore-->>Usecase: agentConfig
+        else Deduce default Agent
+            Usecase->>AgentStore: ListAgents(ctx, userID)
+            AgentStore-->>Usecase: agentConfig
+            Note over Usecase: Select first Agent
+        end
+    end
+
+    rect rgb(230, 245, 230)
+        note right of Usecase: Step 2: Resolve Search Adapter
+        Usecase->>RetrieverRegistry: GetRetriever(agentConfig.ToolRetrievalStrategy())
+        RetrieverRegistry-->>Usecase: retrieverInstance (e.g., CrossEncoderRetriever)
+    end
+
+    rect rgb(255, 245, 220)
+        note right of Usecase: Step 3: Instantiate Chat Aggregate with the Adapter
+        Usecase->>ThreadStore: GetThread(ctx, threadID)
+        ThreadStore-->>Usecase: threadEntity
+        Usecase->>ChatAgg: chat.New(threadEntity, retrieverInstance, accountsPort, ...)
+    end
+
+    Usecase->>ChatAgg: AcceptUserMessage(ctx, userMsg)
+    
+    Usecase->>ChatAgg: RelevantTools(ctx)
+    ChatAgg->>Retriever: RetrieveTools(ctx, userID, threadMessages, limit)
+    Retriever-->>ChatAgg: list of relevant tools
+    ChatAgg-->>Usecase: toolbox
+
+    Usecase->>Client: Stream responses
